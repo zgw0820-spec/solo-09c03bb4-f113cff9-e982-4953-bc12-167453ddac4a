@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>育种巡检数据修复</title>
+<style>
+  :root {
+    --bg:#f4f6f8; --card:#fff; --line:#e3e7ec; --text:#1f2933; --muted:#6b7580;
+    --blue:#2563eb; --blue-d:#1d4ed8; --green:#15803d; --green-bg:#dcfce7;
+    --amber:#b45309; --amber-bg:#fef3c7; --red:#b91c1c; --red-bg:#fee2e2;
+    --purple:#6d28d9; --purple-bg:#ede9fe; --gray-bg:#f1f3f5;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+         background:var(--bg); color:var(--text); font-size:14px; }
+  header { background:#0f3d63; color:#fff; padding:16px 28px; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:6px 0 0; opacity:.85; font-size:13px; }
+  main { max-width:1280px; margin:24px auto; padding:0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:20px 22px; margin-bottom:20px; }
+  .card h2 { margin:0 0 14px; font-size:16px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field label { font-size:13px; color:var(--muted); }
+  input[type=file], input[type=text], select, button { font-size:14px; }
+  input[type=text], select { border:1px solid var(--line); border-radius:6px; padding:8px 10px; min-width:160px; }
+  button { border:0; border-radius:6px; padding:9px 18px; cursor:pointer; background:var(--blue); color:#fff; }
+  button:hover:not(:disabled) { background:var(--blue-d); }
+  button:disabled { background:#a9b4c0; cursor:not-allowed; }
+  button.ghost { background:#fff; color:var(--blue); border:1px solid var(--blue); }
+  button.ghost:hover:not(:disabled) { background:#eff6ff; }
+  button.green { background:var(--green); }
+  button.small { padding:5px 10px; font-size:12px; }
+  .hint { color:var(--muted); font-size:12px; margin-top:8px; line-height:1.7; }
+  .alert { padding:12px 14px; border-radius:8px; margin-bottom:14px; display:none; line-height:1.7; }
+  .alert.error { display:block; background:var(--red-bg); color:var(--red); border:1px solid #fecaca; }
+  .alert.info { display:block; background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; }
+  .pairs-builder { display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  .pair-chip { display:inline-flex; align-items:center; gap:6px; background:var(--gray-bg);
+               border:1px solid var(--line); border-radius:999px; padding:4px 10px; margin:3px 4px 3px 0; font-size:13px; }
+  .pair-chip button { background:none; color:var(--red); padding:0 2px; font-size:14px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:7px 9px; text-align:left; white-space:nowrap; }
+  th { background:#f8fafc; font-weight:600; }
+  td.wrap { white-space:normal; min-width:200px; }
+  .orig { color:var(--muted); }
+  .strike { text-decoration:line-through; color:var(--red); }
+  .new { color:var(--green); font-weight:600; }
+  .badge { display:inline-block; border-radius:999px; padding:2px 9px; font-size:12px; margin-left:6px; }
+  .b-fixed_keep { background:var(--gray-bg); color:var(--muted); }
+  .b-fixed_change { background:var(--red-bg); color:var(--red); }
+  .b-ambiguous_keep { background:var(--green-bg); color:var(--green); }
+  .b-ambiguous_change { background:var(--amber-bg); color:var(--amber); }
+  .b-locked { background:var(--purple-bg); color:var(--purple); }
+  .cellbox { display:flex; flex-direction:column; gap:4px; min-width:150px; }
+  .cellbox .vals { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  select.cand { min-width:110px; padding:5px 8px; }
+  .meta { display:flex; gap:18px; flex-wrap:wrap; color:var(--muted); font-size:13px; margin-bottom:12px; }
+  .meta b { color:var(--text); }
+  .status-pill { border-radius:999px; padding:3px 12px; font-size:12px; }
+  .st-optimal { background:var(--green-bg); color:var(--green); }
+  .st-feasible { background:var(--amber-bg); color:var(--amber); }
+  .st-infeasible { background:var(--red-bg); color:var(--red); }
+  .st-pending,.st-running { background:var(--amber-bg); color:var(--amber); }
+  .st-failed,.st-error,.st-superseded { background:var(--red-bg); color:var(--red); }
+  .stale-banner { background:var(--amber-bg); color:var(--amber); border:1px solid #fde68a;
+                  border-radius:8px; padding:10px 14px; margin-bottom:12px; display:none; }
+  .conflict-box { border:1px solid #fecaca; background:var(--red-bg); border-radius:8px; padding:12px 16px; }
+  .conflict-box li { margin-bottom:6px; line-height:1.6; }
+  .legend span { margin-right:14px; font-size:12px; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid #fde68a;
+             border-top-color:var(--amber); border-radius:50%; animation:spin 1s linear infinite; vertical-align:-2px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .hidden { display:none !important; }
+  code { background:var(--gray-bg); padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>育种巡检数据修复平台</h1>
+  <p>最少改动单元格修复品种/温室抄录错误 · 同株品种一致 · 同托盘温室一致 · 组合合法 · 核实值锁定重算</p>
+</header>
+<main>
+  <!-- 上传区 -->
+  <section class="card" id="uploadCard">
+    <h2>1. 上传数据（巡检 CSV ≤ 30 行；允许组合：品种 ≤ 6、温室 ≤ 6）</h2>
+    <div class="row">
+      <div class="field">
+        <label>巡检 CSV（列：行号,植株号,托盘号,品种,温室,株高）</label>
+        <input type="file" id="inspectionFile" accept=".csv,text/csv" />
+      </div>
+      <div class="field">
+        <label>允许组合 CSV（列：品种,温室，可选）</label>
+        <input type="file" id="allowedFile" accept=".csv,text/csv" />
+      </div>
+    </div>
+    <h2 style="margin-top:18px;">或手工维护允许组合</h2>
+    <div class="pairs-builder">
+      <input type="text" id="pairV" placeholder="品种" />
+      <input type="text" id="pairH" placeholder="温室" />
+      <button class="ghost small" id="addPair" type="button">添加组合</button>
+    </div>
+    <div id="pairChips"></div>
+    <div class="alert" id="uploadAlert"></div>
+    <div style="margin-top:14px;">
+      <button id="uploadBtn">上传并求解</button>
+    </div>
+    <div class="hint">
+      仅「品种」「温室」两列参与修复；植株号、托盘号、株高永不修改。<br/>
+      品种/温室的取值只能来自允许组合；目标是改动单元格数最少，且证明最优后才可确认下载。
+    </div>
+  </section>
+
+  <!-- 会话区 -->
+  <section class="card hidden" id="sessionCard">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">2. 修复方案</h2>
+      <div>
+        <button class="ghost" id="recalcBtn">重新求解</button>
+        <button class="green" id="confirmBtn" disabled>确认方案</button>
+        <button id="downloadBtn" disabled>下载修复 CSV</button>
+      </div>
+    </div>
+    <div class="meta" id="metaBar"></div>
+    <div class="stale-banner" id="staleBanner">
+      核实值已变化，当前展示的是旧方案，<b>已禁止确认/下载</b>。请点击「重新求解」获取新版本最优方案。
+    </div>
+    <div class="alert" id="sessionAlert"></div>
+    <div id="conflictPanel"></div>
+    <div class="legend" style="margin:10px 0;">
+      <span class="badge b-locked">已锁定核实值</span>
+      <span class="badge b-fixed_change">所有最优解都必须改成同一值</span>
+      <span class="badge b-ambiguous_change">必须改，但最优新值不唯一</span>
+      <span class="badge b-ambiguous_keep">可保留原值（另有其他最优取值）</span>
+      <span class="badge b-fixed_keep">所有最优解均保留原值</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="dataTable">
+        <thead><tr id="tableHead"></tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="hint" id="solveHint"></div>
+  </section>
+</main>
+
+<script>
+const CAT_TEXT = {
+  locked: "已锁定核实值",
+  fixed_change: "所有最优解均取同一新值（必须改）",
+  ambiguous_change: "必须改，但新值不唯一",
+  ambiguous_keep: "可保留原值（值不唯一）",
+  fixed_keep: "所有最优解均保留原值",
+};
+let pairs = [];
+let session = null;
+let pollTimer = null;
+let lastSeenRevision = 0;
+
+const $ = (id) => document.getElementById(id);
+
+function showAlert(el, msg) { el.textContent = msg; el.style.display = msg ? "block" : "none"; }
+
+// ---------- 允许组合维护 ----------
+function renderPairs() {
+  const box = $("pairChips");
+  box.innerHTML = "";
+  pairs.forEach((p, i) => {
+    const chip = document.createElement("span");
+    chip.className = "pair-chip";
+    chip.innerHTML = `${esc(p[0])} ↔ ${esc(p[1])}`;
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.onclick = () => { pairs.splice(i, 1); renderPairs(); };
+    chip.appendChild(del);
+    box.appendChild(chip);
+  });
+}
+$("addPair").onclick = () => {
+  const v = $("pairV").value.trim(), h = $("pairH").value.trim();
+  if (!v || !h) { showAlert($("uploadAlert"), "品种和温室都不能为空。"); return; }
+  if (pairs.some(p => p[0] === v && p[1] === h)) { showAlert($("uploadAlert"), "该组合已存在。"); return; }
+  const vs = new Set(pairs.map(p => p[0])).add(v);
+  const hs = new Set(pairs.map(p => p[1])).add(h);
+  if (vs.size > 6 || hs.size > 6) { showAlert($("uploadAlert"), "品种至多 6 种、温室至多 6 座。"); return; }
+  pairs.push([v, h]); $("pairV").value = ""; $("pairH").value = "";
+  showAlert($("uploadAlert"), ""); renderPairs();
+};
+
+// ---------- 上传 ----------
+$("uploadBtn").onclick = async () => {
+  showAlert($("uploadAlert"), "");
+  const insp = $("inspectionFile").files[0];
+  const allowedFile = $("allowedFile").files[0];
+  if (!insp) { showAlert($("uploadAlert"), "请选择巡检 CSV 文件。"); return; }
+  if (!allowedFile && pairs.length === 0) { showAlert($("uploadAlert"), "请上传允许组合 CSV 或手工添加组合。"); return; }
+  const fd = new FormData();
+  fd.append("inspection", insp);
+  if (allowedFile) fd.append("allowed", allowedFile);
+  else fd.append("allowed_json", JSON.stringify({ pairs: pairs.map(p => ({ variety: p[0], house: p[1] })) }));
+  $("uploadBtn").disabled = true;
+  try {
+    const r = await fetch("/api/sessions", { method: "POST", body: fd });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || "上传失败");
+    stopPolling();
+    await loadSession(body.session_id);
+    startPolling(body.session_id);
+  } catch (e) {
+    showAlert($("uploadAlert"), e.message);
+  } finally {
+    $("uploadBtn").disabled = false;
+  }
+};
+
+// ---------- 会话加载与渲染 ----------
+async function loadSession(sid) {
+  const r = await fetch(`/api/sessions/${sid}`);
+  if (!r.ok) { alert("加载会话失败"); return; }
+  const data = await r.json();
+  // 迟到结果保护：若期间已看到更新的 revision，则不渲染旧响应。
+  if (session && data.id === session.id && data.revision < lastSeenRevision) return;
+  session = data;
+  lastSeenRevision = Math.max(lastSeenRevision, data.revision);
+  renderSession();
+}
+
+function renderSession() {
+  const d = session;
+  $("sessionCard").classList.remove("hidden");
+  showAlert($("sessionAlert"), "");
+  const running = d.job_status === "pending" || d.job_status === "running";
+  const stale = d.solution_stale;
+  $("staleBanner").style.display = stale ? "block" : "none";
+  $("recalcBtn").disabled = running;
+
+  const statusPill = d.solution_status
+    ? `<span class="status-pill st-${d.solution_status}">${statusText(d.solution_status)}${running ? " <span class='spinner'></span>" : ""}</span>`
+    : (running ? `<span class="status-pill st-running">求解中 <span class="spinner"></span></span>` : "");
+  $("metaBar").innerHTML = `
+    <span>会话 <b>#${d.id}</b></span>
+    <span>版本 <b>rev ${d.revision}</b></span>
+    <span>数据行 <b>${d.row_count}</b></span>
+    <span>品种 <b>${d.variety_count}</b> / 温室 <b>${d.house_count}</b></span>
+    <span>核实值 <b>${d.locked_count}</b></span>
+    <span>方案状态 ${statusPill}</span>
+    ${d.total_changes !== null && !stale ? `<span>最少改动 <b>${d.total_changes}</b> 格${d.objective_proven ? "（已证最优）" : "（未证最优）"}</span>` : ""}
+    ${d.confirmed ? `<span class="status-pill st-optimal">已确认</span>` : ""}`;
+
+  renderTable();
+  renderConflicts();
+
+  const canConfirm = !stale && !running && d.solution_status === "optimal" && d.objective_proven && !d.confirmed;
+  $("confirmBtn").disabled = !canConfirm;
+  $("downloadBtn").disabled = !d.confirmed || stale;
+  $("solveHint").textContent = running
+    ? "求解进行中，期间仍可修改核实值；迟到的旧结果不会替换新方案。"
+    : (stale ? "方案已过期：锁定变化已立即禁止确认旧方案，请重新求解。" : "");
+}
+
+function renderTable() {
+  const d = session;
+  const head = $("tableHead");
+  head.innerHTML = ["行号","植株号","托盘号","品种（原 → 方案）","温室（原 → 方案）","株高"].map(h => `<th>${h}</th>`).join("");
+  const cellMap = {};
+  d.cells.forEach(c => { cellMap[`${c.row_id}:${c.field}`] = c; });
+  const body = $("tableBody");
+  body.innerHTML = "";
+  d.rows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(r.line_no)}</td><td>${esc(r.plant_no)}</td><td>${esc(r.tray_no)}</td>
+      <td>${cellHtml(cellMap[`${r.row_id}:variety`], r.variety_original, "variety", r.row_id)}</td>
+      <td>${cellHtml(cellMap[`${r.row_id}:house`], r.house_original, "house", r.row_id)}</td>
+      <td>${esc(r.height)}</td>`;
+    body.appendChild(tr);
+  });
+  // 绑定下拉/按钮事件
+  body.querySelectorAll("[data-act]").forEach(el => {
+    el.onchange = el.onclick = () => handleCellAction(el);
+  });
+}
+
+function cellHtml(cell, original, field, rowId) {
+  if (!cell) return `<span class="orig">${esc(original)}</span> <span class="hint">（待求解）</span>`;
+  const changed = cell.proposed && cell.proposed !== original;
+  const origHtml = changed
+    ? `<span class="orig strike">${esc(original)}</span> → <span class="new">${esc(cell.proposed)}</span>`
+    : `<span>${esc(original)}</span>`;
+  const badge = `<span class="badge b-${cell.category}" title="${esc(CAT_TEXT[cell.category] || "")}">${esc(CAT_TEXT[cell.category] || cell.category)}</span>`;
+  let controls;
+  if (cell.locked) {
+    controls = `<div class="vals"><button class="ghost small" data-act="unlock" data-row="${rowId}" data-field="${field}">解除核实值</button>
+      <span class="hint">来源：${cell.lock_source === "original" ? "原值锁定" : "候选值锁定"}</span></div>`;
+  } else {
+    const opts = cell.achievable.map(v =>
+      `<option value="${esc(v)}" ${v === cell.proposed ? "selected" : ""}>${esc(v)}</option>`).join("");
+    controls = `<div class="vals">
+      <button class="small" data-act="lock-original" data-row="${rowId}" data-field="${field}"
+        ${original === cell.proposed && cell.category === "fixed_keep" ? "disabled" : ""}>锁定原值</button>
+      <select class="cand" data-act="lock-candidate" data-row="${rowId}" data-field="${field}">
+        <option value="">候选值…</option>${opts}
+      </select></div>`;
+  }
+  return `<div class="cellbox"><div class="vals">${origHtml} ${badge}</div>${controls}</div>`;
+}
+
+function renderConflicts() {
+  const d = session;
+  const panel = $("conflictPanel");
+  if (!d.conflicts || d.conflicts.length === 0 || d.solution_stale) { panel.innerHTML = ""; return; }
+  if (d.solution_status === "infeasible") {
+    panel.innerHTML = `<div class="conflict-box"><b>无解：以下核实值与规则相互冲突（锁定值未被改动）</b>
+      <ul>${d.conflicts.map(c => `<li><b>${c.kind === "lock" ? "核实值" : "规则"}</b>：${esc(c.description)}</li>`).join("")}</ul></div>`;
+  } else if (d.solution_status === "failed") {
+    panel.innerHTML = `<div class="conflict-box">求解失败，原表与核实值均已保留，可重试「重新求解」。</div>`;
+  } else if (d.solution_status === "feasible") {
+    panel.innerHTML = `<div class="conflict-box" style="border-color:#fde68a;background:var(--amber-bg);color:var(--amber);">
+      求解器在时限内找到可行方案但未证明最优，该方案不可确认；可点击「重新求解」再次尝试。</div>`;
+  } else {
+    panel.innerHTML = "";
+  }
+}
+
+async function handleCellAction(el) {
+  const act = el.dataset.act, rowId = Number(el.dataset.row), field = el.dataset.field;
+  const cell = session.cells.find(c => c.row_id === rowId && c.field === field);
+  const row = session.rows.find(r => r.row_id === rowId);
+  try {
+    if (act === "unlock") {
+      const r = await fetch(`/api/sessions/${session.id}/locks/${rowId}/${field}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json()).detail);
+    } else if (act === "lock-original") {
+      const value = field === "variety" ? row.variety_original : row.house_original;
+      await postLock(rowId, field, value, "original");
+    } else if (act === "lock-candidate") {
+      const value = el.value;
+      if (!value) return;
+      await postLock(rowId, field, value, "candidate");
+    }
+    stopPolling();
+    await loadSession(session.id);
+  } catch (e) {
+    showAlert($("sessionAlert"), e.message);
+  }
+}
+
+async function postLock(rowId, field, value, source) {
+  const r = await fetch(`/api/sessions/${session.id}/locks`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ row_id: rowId, field, value, source }),
+  });
+  if (!r.ok) throw new Error((await r.json()).detail || "锁定失败");
+}
+
+// ---------- 重算 / 确认 / 下载 ----------
+$("recalcBtn").onclick = async () => {
+  const r = await fetch(`/api/sessions/${session.id}/solve`, { method: "POST" });
+  const body = await r.json();
+  if (!r.ok) { showAlert($("sessionAlert"), body.detail); return; }
+  stopPolling();
+  await loadSession(session.id);
+  startPolling(session.id);
+};
+
+$("confirmBtn").onclick = async () => {
+  const r = await fetch(`/api/sessions/${session.id}/confirm`, { method: "POST" });
+  if (!r.ok) { showAlert($("sessionAlert"), (await r.json()).detail); return; }
+  await loadSession(session.id);
+};
+
+$("downloadBtn").onclick = () => {
+  window.location.href = `/api/sessions/${session.id}/download`;
+};
+
+// ---------- 轮询（迟到响应不替换新方案由后端版本控制 + 前端 revision 保护） ----------
+function startPolling(sid) {
+  stopPolling();
+  pollTimer = setInterval(async () => {
+    await loadSession(sid);
+    const stillRunning = session && (session.job_status === "pending" || session.job_status === "running");
+    // 作业结束即停止；若期间用户改了核实值（revision 变化），由按钮触发新一轮轮询。
+    if (!stillRunning) stopPolling();
+  }, 800);
+}
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+function statusText(s) {
+  return { optimal: "已证最优方案", feasible: "可行但未证最优（不可确认）", infeasible: "无解（冲突）", failed: "求解失败",
+           pending: "排队中", running: "求解中", done: "完成", error: "错误", superseded: "已被新版本取代" }[s] || s;
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+renderPairs();
+</script>
+</body>
+</html>
